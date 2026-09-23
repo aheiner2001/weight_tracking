@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weight Forecaster & Energy-Balance Tracker</title>
+    <!-- Chart.js for graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text: #1e293b;
+            --border: #e2e8f0;
+        }
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: var(--primary);
+            margin-bottom: 24px;
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            margin-bottom: 24px;
+        }
+        .prompt-banner {
+            background: #e0e7ff;
+            border-left: 4px solid var(--primary);
+            padding: 16px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+        input, textarea, button {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 8px;
+        }
+        button:hover {
+            background-color: var(--primary-hover);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+            font-size: 0.9rem;
+        }
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+        }
+        th {
+            background-color: #f1f5f9;
+        }
+        .chart-container {
+            position: relative;
+            height: 350px;
+            width: 100%;
+        }
+        .actions {
+            display: flex;
+            gap: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Weight Forecaster & Tracker</h1>
+
+    <!-- Daily Weight Prompt Card -->
+    <div class="card" id="weightPromptCard" style="display:none;">
+        <div class="prompt-banner">
+            <div>
+                <strong>Weight Check-in:</strong> You haven't logged your weight for today (<span id="currentDateText"></span>) yet!
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="todayWeight">Enter today's weight (lbs):</label>
+            <input type="number" step="0.1" id="todayWeight" placeholder="e.g. 214.5">
+        </div>
+        <button onclick="saveTodayWeight()">Save Today's Weight</button>
+    </div>
+
+    <!-- Meal & Calorie Logger Card -->
+    <div class="card">
+        <h2>Log Daily Meals & Calories</h2>
+        <div class="form-group">
+            <label for="logDate">Date:</label>
+            <input type="date" id="logDate">
+        </div>
+        <div class="form-group">
+            <label for="logCalories">Total Calories (kcal):</label>
+            <input type="number" id="logCalories" placeholder="e.g. 1500 (If <1000, auto-adjusts to 2150)">
+        </div>
+        <div class="form-group">
+            <label for="logWeight">Weight (lbs - optional if already logged):</label>
+            <input type="number" step="0.1" id="logWeight" placeholder="Optional weight update">
+        </div>
+        <div class="form-group">
+            <label for="logNotes">Notes / Meals:</label>
+            <textarea id="logNotes" rows="2" placeholder="What did you eat today?"></textarea>
+        </div>
+        <button onclick="addOrUpdateLog()">Save Log Entry</button>
+    </div>
+
+    <!-- Graph Card -->
+    <div class="card">
+        <h2>Weight Trend & Forecast</h2>
+        <div class="chart-container">
+            <canvas id="weightChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Data Table Card -->
+    <div class="card">
+        <h2>Logged History (CSV View)</h2>
+        <button onclick="exportCSV()" style="width: auto; padding: 6px 12px; margin-bottom: 10px;">Download CSV</button>
+        <div style="overflow-x: auto;">
+            <table id="logTable">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Weight (lbs)</th>
+                        <th>Raw Cal</th>
+                        <th>Adjusted Cal</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Initial dataset provided + local storage sync
+    let trackerData = JSON.parse(localStorage.getItem('weightTrackerData')) || [
+        {date: "2026-09-09", weight: 219.2, calories: 1533, adjCalories: 1533, notes: "Hit target ceiling with rice, milk, and fairlife."},
+        {date: "2026-09-10", weight: 220.0, calories: 531, adjCalories: 2150, notes: "Partial log / early day tracking with chili."},
+        {date: "2026-09-11", weight: 220.0, calories: 1475, adjCalories: 1475, notes: "Full day summary; nailed protein (~185g)."},
+        {date: "2026-09-12", weight: 220.0, calories: 1527, adjCalories: 1527, notes: "Corrected for 3/4 pizza batch."},
+        {date: "2026-09-13", weight: 220.0, calories: 324, adjCalories: 2150, notes: "Partial log (2 slices for lunch)."},
+        {date: "2026-09-14", weight: 220.0, calories: 1538, adjCalories: 1538, notes: "Final summary with sandwich, chicken, and roll."},
+        {date: "2026-09-15", weight: null, calories: 1456, adjCalories: 1456, notes: "Finished with pizza, pepperoni, and hot honey."},
+        {date: "2026-09-16", weight: null, calories: 1323, adjCalories: 1323, notes: "Tracked soup, chicken, yogurt, and whole milk."},
+        {date: "2026-09-17", weight: null, calories: 1499, adjCalories: 1499, notes: "Masterclass budgeting with a fully loaded Five Guys burger."},
+        {date: "2026-09-18", weight: null, calories: 308, adjCalories: 2150, notes: "Partial log (raw chicken and zero-sugar drinks)."},
+        {date: "2026-09-19", weight: null, calories: 579, adjCalories: 2150, notes: "Partial log (leftover meal portion and Greek yogurt)."}
+    ];
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    window.onload = function() {
+        document.getElementById('logDate').value = todayStr;
+        document.getElementById('currentDateText').innerText = todayStr;
+        
+        // Check if today's weight is recorded
+        const todayEntry = trackerData.find(d => d.date === todayStr);
+        if (!todayEntry || todayEntry.weight === null || todayEntry.weight === undefined) {
+            document.getElementById('weightPromptCard').style.display = 'block';
+        }
+
+        renderTable();
+        renderChart();
+    };
+
+    function saveTodayWeight() {
+        const val = parseFloat(document.getElementById('todayWeight').value);
+        if (isNaN(val)) {
+            alert('Please enter a valid weight.');
+            return;
+        }
+        let entry = trackerData.find(d => d.date === todayStr);
+        if (entry) {
+            entry.weight = val;
+        } else {
+            trackerData.push({date: todayStr, weight: val, calories: null, adjCalories: null, notes: "Weight check-in"});
+        }
+        saveAndRefresh();
+        document.getElementById('weightPromptCard').style.display = 'none';
+    }
+
+    function addOrUpdateLog() {
+        const date = document.getElementById('logDate').value;
+        const calInput = document.getElementById('logCalories').value;
+        const weightInput = document.getElementById('logWeight').value;
+        const notes = document.getElementById('logNotes').value;
+
+        if (!date) {
+            alert('Please select a date.');
+            return;
+        }
+
+        let calories = calInput ? parseInt(calInput) : null;
+        let adjCalories = calories !== null ? (calories < 1000 ? 2150 : calories) : null;
+        let weight = weightInput ? parseFloat(weightInput) : null;
+
+        let entry = trackerData.find(d => d.date === date);
+        if (entry) {
+            if (calories !== null) {
+                entry.calories = calories;
+                entry.adjCalories = adjCalories;
+            }
+            if (weight !== null) entry.weight = weight;
+            if (notes) entry.notes = notes;
+        } else {
+            trackerData.push({date, weight, calories, adjCalories, notes});
+        }
+
+        // Sort chronologically
+        trackerData.sort((a,b) => new Date(a.date) - new Date(b.date));
+        saveAndRefresh();
+        alert('Log updated successfully!');
+    }
+
+    function saveAndRefresh() {
+        localStorage.setItem('weightTrackerData', JSON.stringify(trackerData));
+        renderTable();
+        renderChart();
+    }
+
+    function renderTable() {
+        const tbody = document.querySelector('#logTable tbody');
+        tbody.innerHTML = '';
+        trackerData.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${row.date}</td>
+                <td>${row.weight !== null && row.weight !== undefined ? row.weight : '-'}</td>
+                <td>${row.calories !== null && row.calories !== undefined ? row.calories : '-'}</td>
+                <td><strong>${row.adjCalories !== null && row.adjCalories !== undefined ? row.adjCalories : '-'}</strong></td>
+                <td>${row.notes || ''}</td>
+            `;
+            tbody.appendChild( প্রতিবেদন = tr);
+        });
+    }
+
+    let myChart = null;
+    function renderChart() {
+        const ctx = document.getElementById('weightChart').getContext('2d');
+        const labels = trackerData.map(d => d.date);
+        const weights = trackerData.map(d => d.weight);
+
+        // Simple linear prediction model based on data trend
+        if (myChart) myChart.destroy();
+
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Actual Scale Weight (lbs)',
+                    data: weights,
+                    borderColor: '#4f46e5',
+                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                    borderWidth: 2,
+                    spanGaps: true,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        title: { display: true, text: 'Weight (lbs)' }
+                    }
+                }
+            }
+        });
+    }
+
+    function exportCSV() {
+        let csvContent = "data:text/csv;charset=utf-8,Date,Weight,Calories,Adjusted_Calories,Notes\n";
+        trackerData.forEach(row => {
+            csvContent += `"${row.date}","${row.weight ?? ''}","${row.calories ?? ''}","${row.adjCalories ?? ''}","${row.notes ?? ''}"\n`;
+        });
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "weight_tracker_log.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+</script>
+
+</body>
+</html>
